@@ -5,7 +5,14 @@ import argparse,torch
 import os
 import json, tqdm, requests
 import yaml
+import warnings
 from models.models import *
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+warnings.simplefilter("ignore", category=urllib3.exceptions.InsecureRequestWarning)
 
 
     
@@ -213,21 +220,32 @@ if __name__ == '__main__':
     if modelname == 'chatgpt':
         model = OpenAIAPIModel(api_key = args.api_key, url = args.url)
     elif 'Llama-2' in modelname:
-        model = LLama2(plm = args.plm)
+        #model = LLama2(plm = args.plm)
+        model = Llama2()
+    elif 'Llama-3' in modelname or 'Llama3' in modelname:
+        model = Llama3Model()
     elif 'chatglm' in modelname:
         model = ChatglmModel(plm = args.plm)
     elif 'moss' in modelname:
         model = Moss(plm = args.plm)
     elif 'vicuna' in modelname:
         model = Vicuna(plm = args.plm)
-    elif 'Qwen' in modelname:
-        model = Qwen(plm = args.plm)
+    # elif 'Qwen' in modelname:
+    #     model = Qwen(plm = args.plm)
+    # elif 'Qwen2' in modelname:
+    #     model = Qwen2(plm = args.plm)
     elif 'Baichuan' in modelname:
         model = Baichuan(plm = args.plm)
     elif 'WizardLM' in modelname:
         model = WizardLM(plm = args.plm)
     elif 'BELLE' in modelname:
         model = BELLE(plm = args.plm)
+    elif 'Qwen' in modelname:
+        #model = QwenChat()
+        model = QwenGroq()
+    elif 'GeminiModel' in modelname:
+        print("GeminiModel")
+        model = GeminiModel()
     
 
 
@@ -278,9 +296,12 @@ if __name__ == '__main__':
             tt += 1
         elif 0 not in label and 1 in label:
             tt += 1
-    print(tt/len(results))
+    print("Progress",tt/len(results))
+    accuracy =  (1 - tt/len(results))*100
     scores = {
     'all_rate': (tt)/len(results),
+    'model': modelname,
+    'accuracy': accuracy,
     'noise_rate': noise_rate,
     'tt':tt,
     'nums': len(results),

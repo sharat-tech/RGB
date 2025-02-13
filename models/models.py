@@ -160,7 +160,85 @@ class BELLE:
         response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
         return response
 
-class LLama2:
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+class Llama2:
+    def __init__(self, plm="meta-llama/Llama-2-7b-chat-hf", quantized=False):
+        """
+        Initializes the Llama2 model.
+        
+        :param plm: The pre-trained model name or path.
+        :param quantized: Whether to use 4-bit quantization for reduced memory usage.
+        """
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        # Load tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(plm)
+        
+        # Load model with memory-efficient settings
+        model_kwargs = {"torch_dtype": torch.float16, "device_map": "auto"}
+        
+        if quantized:
+            model_kwargs.update({"load_in_4bit": True})  # Enable 4-bit quantization
+        
+
+        self.model = AutoModelForCausalLM.from_pretrained(
+            plm,
+            torch_dtype=torch.float16,
+            device_map=None  # Don't auto-offload to CPU
+        ).to(self.device)  # Explicitly move to GPU
+
+    def get_prompt(self, message: str, chat_history: list[tuple[str, str]], system_prompt: str) -> str:
+        """
+        Constructs a properly formatted chat prompt with history.
+        
+        :param message: User's input message.
+        :param chat_history: List of (user, assistant) chat history.
+        :param system_prompt: The system message guiding AI behavior.
+        :return: Formatted prompt string.
+        """
+        texts = [f'<s>[INST] <<SYS>>\n{system_prompt}\n<</SYS>>\n\n']
+        for user_input, response in chat_history:
+            texts.append(f'{user_input.strip()} [/INST] {response.strip()} </s><s>[INST] ')
+        texts.append(f'{message.strip()} [/INST]')
+        return ''.join(texts)
+
+    def generate(self, text, temperature=0.7, system="You are a helpful assistant.", top_p=0.8, max_new_tokens=256):
+        """
+        Generates a response from Llama 2.
+
+        :param text: User input text.
+        :param temperature: Controls randomness (higher = more random).
+        :param system: System instructions for behavior control.
+        :param top_p: Nucleus sampling probability.
+        :param max_new_tokens: Max response length.
+        :return: Model-generated response.
+        """
+        prompt = self.get_prompt(text, [], system)
+
+        inputs = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=False, return_token_type_ids=False)
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        outputs = self.model.generate(
+            **inputs,
+            do_sample=True,
+            temperature=temperature,
+            top_p=top_p,
+            max_length=max_new_tokens + inputs['input_ids'].size(-1)
+        )
+
+        response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        return response
+
+# Example Usage:
+# model = Llama2(quantized=True)  # Use quantized for better memory efficiency
+# response = model.generate("What is AI?")
+# print(response)
+
+
+
+class LLama222:
     def __init__(self,plm) -> None:
         self.tokenizer = AutoTokenizer.from_pretrained(plm)
 
@@ -226,3 +304,271 @@ class OpenAIAPIModel():
             print(text)
             print(responses)
         return responses.json()['choices'][0]['message']['content']
+    
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
+import torch
+
+
+import requests
+import json
+import os
+
+class Llama3Model:
+    def __init__(self, api_key= "", model="llama3-70b-8192"):
+        self.api_key =api_key
+        self.model = model
+        #self.api_url = "https://api.groq.com/v1/chat/completions"
+        self.api_url = "https://api.groq.com/openai/v1/chat/completions"  
+
+    def generate(self, text, temperature=0.7, top_p=0.8, max_new_tokens=256):
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+
+        }
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "You are a helpful AI assistant."},
+                {"role": "user", "content": text}
+            ],
+            "temperature": temperature,
+            "top_p": 0.8,
+            "max_tokens": max_new_tokens
+        }
+
+        response = requests.post(self.api_url, headers=headers, json=payload,verify=False )
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"]
+        else:
+            return f"Error: {response.json()}"
+        
+import requests
+import json
+import os
+import warnings
+import urllib3
+
+# Suppress SSL warnings
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+warnings.simplefilter("ignore", category=urllib3.exceptions.InsecureRequestWarning)
+
+class QwenChat:
+    def __init__(self, api_key="e0ea66a0-2186-43e3-b8cf-1c1112783c8e", model="Qwen2.5-72B-Instruct"):
+        self.api_key = api_key 
+        if not self.api_key:
+            raise ValueError("API key must be provided either as an argument or via the SAMBANNOVA_API_KEY environment variable.")
+        
+        self.model = model
+        self.api_url = "https://api.sambanova.ai/v1/chat/completions"  # Ensure correct endpoint
+
+    def generate(self, text, temperature=0.7, top_p=0.8, max_new_tokens=256, stream=False):
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "You are a helpful AI assistant."},
+                {"role": "user", "content": text}
+            ],
+            "temperature": temperature,
+            "top_p": 0.8,
+            "max_tokens": max_new_tokens,
+            "stream": stream
+        }
+
+        try:
+            response = requests.post(self.api_url, headers=headers, json=payload, verify=False)
+            response.raise_for_status()  # Raise error for HTTP failures
+
+            if stream:
+                # Handle streaming response
+                full_response = ""
+                for line in response.iter_lines(decode_unicode=True):
+                    if line:
+                        if line.startswith("data:"):
+                            if line.strip() == "data: [DONE]":
+                                break  # Exit the loop if it's the end
+
+                            try:
+                                json_data = json.loads(line[5:].strip())
+                            except json.JSONDecodeError as e:
+                                print(f"JSON decoding error: {e}, line: {line}")
+                                continue
+
+                            choices = json_data.get("choices")
+                            if choices and isinstance(choices, list) and len(choices) > 0:
+                                delta = choices[0].get("delta", {})
+                                content = delta.get("content", "")
+                                full_response += content
+
+                return full_response or "No response received."
+            else:
+                # Handle non-streaming response
+                data = response.json()
+                return data.get("choices", [{}])[0].get("message", {}).get("content", "No response received.")
+
+        except requests.exceptions.HTTPError as e:
+            print(f"HTTP Error: {e}")
+            print(f"Response Body: {response.text}")
+            return f"Request failed: {e}"
+        except requests.exceptions.RequestException as e:
+            return f"Request failed: {e}"
+
+
+
+import requests
+import json
+import os
+import time
+
+class QwenGroq:
+    def __init__(self, api_key= "", model="qwen-2.5-32b"):
+        self.api_key =api_key
+        self.model = model
+        #self.api_url = "https://api.groq.com/v1/chat/completions"
+        self.api_url = "https://api.groq.com/openai/v1/chat/completions"  
+
+    def generate(self, text, temperature=0.7, top_p=0.8, max_new_tokens=128):
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+
+        }
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "You are a helpful AI assistant."},
+                {"role": "user", "content": text}
+            ],
+            "temperature": temperature,
+            "top_p": 0.95,
+            "max_tokens": max_new_tokens
+        }
+
+        response = requests.post(self.api_url, headers=headers, json=payload,verify=False )
+        while True:
+            if response.status_code == 200:
+                return response.json()["choices"][0]["message"]["content"]
+            elif response.status_code == 429:  # Rate limit error
+                wait_time = 12  # Adjust based on error message
+                print(f"Rate limit reached. Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+            else:
+                return f"Error: {response.json()}"
+
+
+
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+class ChatModel:
+    def __init__(self, model_name="mistralai/Mistral-7B-Instruct", quantized=False):
+        """
+        Initializes the selected model (Mistral 7B, Phi-2, Gemma 2B).
+        
+        :param model_name: The Hugging Face model name.
+        :param quantized: Whether to use 4-bit quantization (reduces memory usage).
+        """
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        # Load tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        # Load model with memory-efficient settings
+        model_kwargs = {"torch_dtype": torch.float16, "device_map": "auto"}
+
+        if quantized:
+            model_kwargs.update({"load_in_4bit": True})  # Enable 4-bit quantization
+
+        self.model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+        self.model.to(self.device)
+
+    def get_prompt(self, message: str, chat_history: list[tuple[str, str]], system_prompt: str) -> str:
+        """
+        Formats the chat prompt including system instructions and history.
+        
+        :param message: User's input message.
+        :param chat_history: List of (user, assistant) chat history.
+        :param system_prompt: System instructions for AI behavior.
+        :return: Formatted prompt string.
+        """
+        texts = [f'<s>[INST] <<SYS>>\n{system_prompt}\n<</SYS>>\n\n']
+        for user_input, response in chat_history:
+            texts.append(f'{user_input.strip()} [/INST] {response.strip()} </s><s>[INST] ')
+        texts.append(f'{message.strip()} [/INST]')
+        return ''.join(texts)
+
+    def generate(self, text, temperature=0.7, system="You are a helpful assistant.", top_p=0.8, max_new_tokens=256):
+        """
+        Generates a response from the model.
+
+        :param text: User input text.
+        :param temperature: Controls randomness (higher = more random).
+        :param system: System instructions for behavior control.
+        :param top_p: Nucleus sampling probability.
+        :param max_new_tokens: Max response length.
+        :return: Model-generated response.
+        """
+        prompt = self.get_prompt(text, [], system)
+
+        inputs = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=False, return_token_type_ids=False)
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        outputs = self.model.generate(
+            **inputs,
+            do_sample=True,
+            temperature=temperature,
+            top_p=top_p,
+            max_length=max_new_tokens + inputs['input_ids'].size(-1)
+        )
+
+        response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        return response
+
+# Example Usage:
+# model = ChatModel("mistralai/Mistral-7B-Instruct", quantized=True)  # Use quantized=True for lower memory usage
+# response = model.generate("What is quantum computing?")
+# print(response)
+
+from google import genai
+from google.genai import types
+
+class GeminiModel:
+    def __init__(self, model: str = "gemini-2.0-flash"):
+        self.client = genai.Client(api_key="")
+        self.model = model
+
+    def generate(self, prompt: str, *args, **kwargs):
+        """Generate content based on the given prompt."""
+        try:
+            response = self.client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=[prompt],
+                    config=types.GenerateContentConfig(
+                        max_output_tokens=500,
+                        temperature=0.1,
+                        candidate_count=5,
+                        top_k=5,
+                        top_p=1
+                    )
+                )
+           # Extract response text properly from Candidate objects
+            full_response = ""
+            if hasattr(response, "candidates"):
+                for candidate in response.candidates:
+                    if hasattr(candidate, "content") and candidate.content.parts:
+                        for part in candidate.content.parts:
+                            if hasattr(part, "text"):
+                                full_response += part.text + "\n"  # Append text response
+
+            return full_response.strip() if full_response else "Error: No valid response received."
+
+        except Exception as e:
+            return f"Error: {e}"  
+
