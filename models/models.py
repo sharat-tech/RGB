@@ -355,7 +355,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 warnings.simplefilter("ignore", category=urllib3.exceptions.InsecureRequestWarning)
 
 class QwenChat:
-    def __init__(self, api_key="e0ea66a0-2186-43e3-b8cf-1c1112783c8e", model="Qwen2.5-72B-Instruct"):
+    def __init__(self, api_key="", model="Qwen2.5-72B-Instruct"):
         self.api_key = api_key 
         if not self.api_key:
             raise ValueError("API key must be provided either as an argument or via the SAMBANNOVA_API_KEY environment variable.")
